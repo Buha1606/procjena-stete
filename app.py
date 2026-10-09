@@ -76,14 +76,14 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------
-# Google Sheets & Бaзa подешавања
+# Google Sheets Подешавања
 # ---------------------------------------------------------
 SPREADSHEET_NAME = "Evidencija Steta"
-LOCAL_DB_FILE = os.path.join(os.path.dirname(__file__), "baza_steta_nevesinje.csv")
 
 def get_gspread_sheet(show_error=True):
     """
-    Покушава аутентификацију на Google Sheets користећи st.secrets["gcp_service_account"].
+    Покушава аутентификацију на Google Sheets користећи st.secrets, 
+    директне секрет фајлове или променљиве окружења за Render / Cloud деплојмент.
     Враћа (sheet, error_message).
     """
     scopes = [
@@ -91,15 +91,62 @@ def get_gspread_sheet(show_error=True):
         "https://www.googleapis.com/auth/drive"
     ]
     
-    if "gcp_service_account" not in st.secrets:
-        msg = "Nisu pronađeni Google Service Account kredencijali u st.secrets."
+    creds_dict = None
+    
+    # 1. Сигурно учитавање из st.secrets (хвата све типове изузетака укључујући StreamlitSecretNotFoundError)
+    try:
+        sec = getattr(st, "secrets", None)
+        if sec is not None:
+            try:
+                if "gcp_service_account" in sec:
+                    creds_dict = dict(sec["gcp_service_account"])
+                elif "type" in sec and sec.get("type") == "service_account":
+                    creds_dict = dict(sec)
+            except BaseException:
+                pass
+    except BaseException:
+        pass
+
+    # 2. Покушај читања secrets.toml са познатих путања на диску (за Render)
+    if not creds_dict:
+        possible_paths = [
+            os.path.join(os.path.dirname(__file__), ".streamlit", "secrets.toml"),
+            os.path.join(os.getcwd(), ".streamlit", "secrets.toml"),
+            "/opt/render/project/src/.streamlit/secrets.toml",
+            "/opt/render/.streamlit/secrets.toml"
+        ]
+        for p in possible_paths:
+            if os.path.exists(p):
+                try:
+                    import toml
+                    tdata = toml.load(p)
+                    if "gcp_service_account" in tdata:
+                        creds_dict = dict(tdata["gcp_service_account"])
+                    elif "type" in tdata and tdata.get("type") == "service_account":
+                        creds_dict = dict(tdata)
+                    if creds_dict:
+                        break
+                except Exception:
+                    pass
+
+    # 3. Покушај из OS Environment Variables (Render Environment Variables)
+    if not creds_dict:
+        import json
+        env_json = os.environ.get("GCP_SERVICE_ACCOUNT") or os.environ.get("GCP_SERVICE_ACCOUNT_JSON")
+        if env_json:
+            try:
+                creds_dict = json.loads(env_json)
+            except Exception:
+                pass
+
+    if not creds_dict:
+        msg = "Nisu pronađeni Google Service Account kredencijali u secrets.toml нити у окружењу."
         if show_error:
             st.error(f"⚠️ {msg}")
         return None, msg
 
     try:
-        creds_dict = dict(st.secrets["gcp_service_account"])
-        if "private_key" in creds_dict:
+        if "private_key" in creds_dict and isinstance(creds_dict["private_key"], str):
             creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
         
         credentials = Credentials.from_service_account_info(creds_dict, scopes=scopes)
@@ -115,7 +162,7 @@ def get_gspread_sheet(show_error=True):
         return None, msg
 
 def load_records_dataframe():
-    """Учитава све сачуване уносе из Google Sheets или локалне CSV базе."""
+    """Учитава све сачуване уносе искључиво из Google Sheets табеле."""
     headers = ["Датум_и_Време", "Службеник", "Име_и_Презиме", "Насеље", "Коефицијент", "Основица_КМ", "Коначна_Штета_КМ", "Спецификација"]
     
     sheet, _ = get_gspread_sheet(show_error=False)
@@ -142,24 +189,10 @@ def load_records_dataframe():
         except Exception:
             pass
 
-    if os.path.exists(LOCAL_DB_FILE):
-        try:
-            df = pd.read_csv(LOCAL_DB_FILE)
-            for col in ["Основица_КМ", "Коначна_Штета_КМ"]:
-                if col in df.columns:
-                    df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
-            return df
-        except Exception:
-            pass
-
-    if "session_records" in st.session_state and st.session_state["session_records"]:
-        df = pd.DataFrame(st.session_state["session_records"])
-        return df
-
     return pd.DataFrame(columns=headers)
 
 def save_new_record(officer, name, settlement, coeff, osnova, steta, crops_spec):
-    """Чува нови обрачун у Google Sheets и у локалну базу."""
+    """Чува нови обрачун искључиво у Google Sheets."""
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
     row = [
@@ -195,26 +228,6 @@ def save_new_record(officer, name, settlement, coeff, osnova, steta, crops_spec)
             st.error(f"Došlo je do greške prilikom upisa u red tabele: {e}")
     else:
         st.warning(f"⚠️ Podaci nisu upisani u Google Sheets: {err}")
-
-    df_new = pd.DataFrame([{
-        "Датум_и_Време": timestamp,
-        "Службеник": officer,
-        "Име_и_Презиме": name,
-        "Насеље": settlement,
-        "Коефицијент": f"{int(coeff*100)}%",
-        "Основица_КМ": float(osnova),
-        "Коначна_Штета_КМ": float(steta),
-        "Спецификација": crops_spec
-    }])
-
-    if os.path.exists(LOCAL_DB_FILE):
-        df_new.to_csv(LOCAL_DB_FILE, mode='a', header=False, index=False)
-    else:
-        df_new.to_csv(LOCAL_DB_FILE, index=False)
-
-    if "session_records" not in st.session_state:
-        st.session_state["session_records"] = []
-    st.session_state["session_records"].append(df_new.to_dict('records')[0])
 
     return saved_gs
 
@@ -991,9 +1004,7 @@ with tab1:
                     spec_text = ", ".join(spec_list) if spec_list else "Штета обрачуната"
                     saved_gs = save_new_record(officer_name, име_презиме, насеље, коефицијент, укупна_основа, укупна_штета, spec_text)
                     if saved_gs:
-                        st.success("✅ Обрачун је успешно сачуван у Google Sheets и у базу!")
-                    else:
-                        st.success("✅ Обрачун је сачуван у локалну базу!")
+                        st.success("✅ Обрачун је успешно сачуван у Google Sheets!")
 
         with col_b2:
             if st.button("📄 Генериши службени образац у ПДФ", type="secondary", use_container_width=True):
