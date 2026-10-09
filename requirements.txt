@@ -2,4 +2,6 @@ streamlit>=1.25.0
 reportlab>=3.6.0
 pandas>=2.0.0
 plotly>=5.14.0
-matplotlib
+gspread>=5.10.0
+google-auth>=2.20.0
+matplotlib>=3.7.0
