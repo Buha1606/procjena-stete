@@ -81,45 +81,60 @@ st.set_page_config(
 SPREADSHEET_NAME = "Evidencija Steta"
 LOCAL_DB_FILE = os.path.join(os.path.dirname(__file__), "baza_steta_nevesinje.csv")
 
-def get_gspread_sheet():
+def get_gspread_sheet(show_error=True):
     """
     Покушава аутентификацију на Google Sheets користећи st.secrets["gcp_service_account"].
-    Враћа радни лист (worksheet) или None ако тајне нису пронађене.
+    Враћа (sheet, error_message).
     """
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive"
     ]
+    
+    if "gcp_service_account" not in st.secrets:
+        msg = "Nisu pronađeni Google Service Account kredencijali u st.secrets."
+        if show_error:
+            st.error(f"⚠️ {msg}")
+        return None, msg
+
     try:
-        if "gcp_service_account" in st.secrets:
-            creds_dict = dict(st.secrets["gcp_service_account"])
-            if "private_key" in creds_dict:
-                creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
-            credentials = Credentials.from_service_account_info(creds_dict, scopes=scopes)
-            client = gspread.authorize(credentials)
-            
-            try:
-                sheet = client.open(SPREADSHEET_NAME).sheet1
-            except gspread.SpreadsheetNotFound:
-                sh = client.create(SPREADSHEET_NAME)
-                sheet = sh.sheet1
-                headers = ["Датум_и_Време", "Службеник", "Име_и_Презиме", "Насеље", "Коефицијент", "Основица_КМ", "Коначна_Штета_КМ", "Спецификација"]
-                sheet.append_row(headers)
-            return sheet
-    except Exception:
-        pass
-    return None
+        creds_dict = dict(st.secrets["gcp_service_account"])
+        if "private_key" in creds_dict:
+            creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+        
+        credentials = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+        client = gspread.authorize(credentials)
+        
+        # Отварање табеле и првог радног листа
+        sheet = client.open(SPREADSHEET_NAME).sheet1
+        return sheet, None
+    except Exception as e:
+        msg = f"Greška sa Google Sheets konekcijom: {e}"
+        if show_error:
+            st.error(f"❌ {msg}")
+        return None, msg
 
 def load_records_dataframe():
     """Учитава све сачуване уносе из Google Sheets или локалне CSV базе."""
     headers = ["Датум_и_Време", "Службеник", "Име_и_Презиме", "Насеље", "Коефицијент", "Основица_КМ", "Коначна_Штета_КМ", "Спецификација"]
     
-    sheet = get_gspread_sheet()
+    sheet, _ = get_gspread_sheet(show_error=False)
     if sheet:
         try:
             data = sheet.get_all_records()
             if data:
                 df = pd.DataFrame(data)
+                col_map = {
+                    "Datum": "Датум_и_Време",
+                    "Proizvodjac": "Име_и_Презиме",
+                    "Naselje": "Насеље",
+                    "UkupnaSteta": "Коначна_Штета_КМ",
+                    "Sluzbenik": "Службеник",
+                    "Osnovica": "Основица_КМ",
+                    "Koeficijent": "Коефицијент",
+                    "Specifikacija": "Спецификација"
+                }
+                df = df.rename(columns=col_map)
                 for col in ["Основица_КМ", "Коначна_Штета_КМ"]:
                     if col in df.columns:
                         df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
@@ -145,7 +160,8 @@ def load_records_dataframe():
 
 def save_new_record(officer, name, settlement, coeff, osnova, steta, crops_spec):
     """Чува нови обрачун у Google Sheets и у локалну базу."""
-    timestamp = datetime.datetime.now().strftime("%d.%m.%Y. %H:%M")
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
     row = [
         timestamp,
         officer,
@@ -153,18 +169,32 @@ def save_new_record(officer, name, settlement, coeff, osnova, steta, crops_spec)
         settlement,
         f"{int(coeff*100)}%",
         float(osnova),
-        float(steta),
+        round(float(steta), 2),
         crops_spec
     ]
     
     saved_gs = False
-    sheet = get_gspread_sheet()
+    sheet, err = get_gspread_sheet(show_error=True)
     if sheet:
         try:
-            sheet.append_row(row)
+            all_vals = sheet.get_all_values()
+            if not all_vals:
+                headers = ["Datum", "Proizvodjac", "Naselje", "UkupnaSteta", "Sluzbenik", "Osnovica_KM", "Koeficijent", "Specifikacija"]
+                sheet.append_row(headers)
+                sheet.append_row(row)
+            else:
+                first_row = all_vals[0]
+                if len(first_row) == 5 and ("Datum" in first_row[0] or "Датум" in first_row[0]):
+                    sheet.append_row([timestamp, name, settlement, round(float(steta), 2), officer])
+                else:
+                    sheet.append_row(row)
+            
             saved_gs = True
+            st.info("Podaci su uspješno zabilježeni u Google Sheets tabelu!")
         except Exception as e:
-            st.warning(f"⚠️ Грешка при упису на Google Sheets: {e}")
+            st.error(f"Došlo je do greške prilikom upisa u red tabele: {e}")
+    else:
+        st.warning(f"⚠️ Podaci nisu upisani u Google Sheets: {err}")
 
     df_new = pd.DataFrame([{
         "Датум_и_Време": timestamp,
@@ -295,11 +325,11 @@ with st.sidebar:
     st.success(f"🟢 Пријављени службеник:\n\n**{officer_name}**")
     
     # Статус Google Sheets везе
-    gs_client = get_gspread_sheet()
+    gs_client, gs_err = get_gspread_sheet(show_error=False)
     if gs_client:
-        st.info("☁️ Google Sheets: **Повезано**")
+        st.info("☁️ Google Sheets: **Повезано (`Evidencija Steta`)**")
     else:
-        st.caption("ℹ️ Google Sheets: Локални режим (secrets.toml није учитан)")
+        st.caption(f"ℹ️ Google Sheets: Није повезано ({gs_err})")
 
     if st.button("🔒 Одјави се", type="secondary", use_container_width=True):
         st.session_state["authenticated"] = False
