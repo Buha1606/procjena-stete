@@ -78,7 +78,7 @@ st.set_page_config(
 # ---------------------------------------------------------
 # Google Sheets & Бaзa подешавања
 # ---------------------------------------------------------
-SPREADSHEET_NAME = "Обрачун_Штета_Невесиње"
+SPREADSHEET_NAME = "Evidencija Steta"
 LOCAL_DB_FILE = os.path.join(os.path.dirname(__file__), "baza_steta_nevesinje.csv")
 
 def get_gspread_sheet():
