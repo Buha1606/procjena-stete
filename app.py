@@ -326,14 +326,15 @@ NASELJA_LISTA = [
 def get_crop_coefficients(naselje):
     """
     Враћа проценте штете по пољопривредним културама на основу насеља:
-    - Бојишта и Лапчевине: Башта 80%, воће 80%, пластеник 80%, кромпир 70%, жито 60%, силажни кукуруз 40%, лук 35%, купус 30%
-    - Сва остала насеља: Башта 70%, воће 70%, пластеник 70%, кромпир 60%, жито 50%, силажни кукуруз 30%, лук 25%, купус 20%
+    - Бојишта и Лапчевине: Башта 80%, воће 80%, пластеник 100%, кромпир 70%, жито 60%, силажни кукуруз 40%, лук 35%, купус 30%
+    - Сва остала насеља: Башта 70%, воће 70%, пластеник 100%, кромпир 60%, жито 50%, силажни кукуруз 30%, лук 25%, купус 20%
+    Штета на пластеницима (најлон) је 100% за сва насеља јер оштећени најлон није могуће поново користити након града.
     """
     if naselje in ["Бојишта", "Лапчевине"]:
         return {
             "basta": 0.80,
             "voce": 0.80,
-            "plastenik": 0.80,
+            "plastenik": 1.00,
             "krompir": 0.70,
             "zito": 0.60,
             "kukuruz": 0.40,
@@ -344,7 +345,7 @@ def get_crop_coefficients(naselje):
         return {
             "basta": 0.70,
             "voce": 0.70,
-            "plastenik": 0.70,
+            "plastenik": 1.00,
             "krompir": 0.60,
             "zito": 0.50,
             "kukuruz": 0.30,
@@ -394,7 +395,7 @@ with st.sidebar:
     🥬 **Поврће, Баште & Пластеници:**
     - **Баште**: 250 КМ / 100 м²
     - **Пластеник (најлон)**: 1,10 КМ/м² најлона  
-      *(за 100 м² засада = 300 м² најлона)*
+      *(за 100 м² засада = 300 м² најлона | штета на најлону је 100%)*
     - **Кромпир**: 3 т/дулуму (1,00 КМ/кг)
     - **Лук**: 4 т/дулуму (1,20 КМ/кг)
     - **Купус**: 6 т/дулуму (1,00 КМ/кг)
@@ -409,8 +410,8 @@ with st.sidebar:
     **Проценти штете по културама и насељима:**
     
     🏡 **Бојишта и Лапчевине:**
+    - Пластеник (најлон): **100%**
     - Башта: **80%**
-    - Пластеник: **80%**
     - Воће (и лоза/шипурак): **80%**
     - Кромпир: **70%**
     - Жито: **60%**
@@ -419,8 +420,8 @@ with st.sidebar:
     - Купус: **30%**
     
     🏡 **Сва остала насеља:**
+    - Пластеник (најлон): **100%**
     - Башта: **70%**
-    - Пластеник: **70%**
     - Воће (и лоза/шипурак): **70%**
     - Кромпир: **60%**
     - Жито: **50%**
@@ -434,6 +435,40 @@ with st.sidebar:
 # Главни табуси за навигацију
 tab1, tab2 = st.tabs(["📝 Обрачун и Унос Штете", "📊 Збирни Дашборд (База Уноса)"])
 
+# Иницијализација верзије обрасца за потпуно ресетовање ("Нови унос")
+if "form_version" not in st.session_state:
+    st.session_state["form_version"] = 0
+
+fv = st.session_state["form_version"]
+
+FORM_BASE_KEYS = [
+    "ime_prezime", "odabrano_naselje",
+    "st_jab", "pr_jab", "ci_jab",
+    "st_kru", "pr_kru", "ci_kru",
+    "st_slj", "pr_slj", "ci_slj",
+    "st_ora", "pr_ora", "ci_ora",
+    "p_loza", "pr_loza", "ci_loza",
+    "p_sipurak", "pr_sipurak", "ci_sipurak",
+    "d_zito", "pr_zito", "ci_zito",
+    "d_kukuruz", "pr_kukuruz", "ci_kukuruz",
+    "b_p",
+    "pl_pov", "pl_fak", "pl_ci",
+    "k_d", "pr_kro", "ci_kro",
+    "l_d", "pr_luk", "ci_luk",
+    "kup_d", "pr_kup", "ci_kup",
+]
+
+def reset_form_callback():
+    """Поништава све унесене вриједности у обрасцу, враћа све параметре на нулу и покреће чисти образац."""
+    curr_fv = st.session_state.get("form_version", 0)
+    for k in FORM_BASE_KEYS:
+        k_curr = f"{k}_{curr_fv}"
+        if k_curr in st.session_state:
+            del st.session_state[k_curr]
+        if k in st.session_state:
+            del st.session_state[k]
+    st.session_state["form_version"] = curr_fv + 1
+
 # ---------------------------------------------------------
 # TAB 1: Обрачун и Унос Штете
 # ---------------------------------------------------------
@@ -441,13 +476,17 @@ with tab1:
     col_left, col_right = st.columns([1, 1], gap="large")
 
     with col_left:
-        st.subheader("1. Подаци о произвођачу и локацији")
+        col_hdr1, col_hdr2 = st.columns([3, 1.2])
+        with col_hdr1:
+            st.subheader("1. Подаци о произвођачу и локацији")
+        with col_hdr2:
+            st.button("🔄 Нови унос", on_click=reset_form_callback, key=f"btn_novi_unos_top_{fv}", help="Поништава све унесене параметре на нулу и припрема нови унос", use_container_width=True)
         
         col_p1, col_p2 = st.columns(2)
         with col_p1:
-            име_презиме = st.text_input("Име и презиме произвођача", placeholder="нпр. Марко Марковић")
+            име_презиме = st.text_input("Име и презиме произвођача", placeholder="нпр. Марко Марковић", key=f"ime_prezime_{fv}")
         with col_p2:
-            насеље = st.selectbox("Насеље / Локација", NASELJA_LISTA)
+            насеље = st.selectbox("Насеље / Локација", NASELJA_LISTA, key=f"odabrano_naselje_{fv}")
 
         crop_coeffs = get_crop_coefficients(насеље)
         coef_voce = crop_coeffs["voce"]
@@ -479,67 +518,67 @@ with tab1:
 
         # Воћке
         with st.expander("🍎 Воћке, Винова лоза и Шипурак", expanded=True):
-            st.caption("Унесите податке за оне врсте воћа/култура које су претрпјеле штету. Предефинисане цијене и приноси се могу по потреби прилагодити.")
+            st.caption("Унесите податке за оне врсте воћа/култура које су претрпјеле штету. Сви параметри почињу од нуле према правилима обрасца.")
 
             # Јабука
             st.markdown("**🍎 Јабука** *(референтни принос: 30–50 кг/стаблу | цијена: 1,20 КМ/кг)*")
             col_j1, col_j2, col_j3 = st.columns(3)
             with col_j1:
-                st_jabuka = st.number_input("Број стабала", min_value=0, value=0, step=1, key="st_jab")
+                st_jabuka = st.number_input("Број стабала", min_value=0, value=0, step=1, key=f"st_jab_{fv}")
             with col_j2:
-                pr_jabuka = st.number_input("Принос (кг/стаблу)", min_value=0.0, value=40.0, step=1.0, key="pr_jab")
+                pr_jabuka = st.number_input("Принос (кг/стаблу)", min_value=0.0, value=0.0, step=1.0, help="Референтни принос: 30–50 кг/стаблу", key=f"pr_jab_{fv}")
             with col_j3:
-                ci_jabuka = st.number_input("Цијена (КМ/кг)", min_value=0.0, value=1.20, step=0.10, key="ci_jab")
+                ci_jabuka = st.number_input("Цијена (КМ/кг)", min_value=0.0, value=1.20, step=0.10, key=f"ci_jab_{fv}")
 
             # Крушка
             st.markdown("**🍐 Крушка** *(референтни принос: 30–60 кг/стаблу | цијена: 1,50 КМ/кг)*")
             col_k1, col_k2, col_k3 = st.columns(3)
             with col_k1:
-                st_kruska = st.number_input("Број стабала", min_value=0, value=0, step=1, key="st_kru")
+                st_kruska = st.number_input("Број стабала", min_value=0, value=0, step=1, key=f"st_kru_{fv}")
             with col_k2:
-                pr_kruska = st.number_input("Принос (кг/стаблу)", min_value=0.0, value=45.0, step=1.0, key="pr_kru")
+                pr_kruska = st.number_input("Принос (кг/стаблу)", min_value=0.0, value=0.0, step=1.0, help="Референтни принос: 30–60 кг/стаблу", key=f"pr_kru_{fv}")
             with col_k3:
-                ci_kruska = st.number_input("Цијена (КМ/кг)", min_value=0.0, value=1.50, step=0.10, key="ci_kru")
+                ci_kruska = st.number_input("Цијена (КМ/кг)", min_value=0.0, value=1.50, step=0.10, key=f"ci_kru_{fv}")
 
             # Шљива
             st.markdown("**🍑 Шљива** *(референтни принос: 25–45 кг/стаблу | цијена: 1,50 КМ/кг)*")
             col_s1, col_s2, col_s3 = st.columns(3)
             with col_s1:
-                st_sljiva = st.number_input("Број стабала", min_value=0, value=0, step=1, key="st_slj")
+                st_sljiva = st.number_input("Број стабала", min_value=0, value=0, step=1, key=f"st_slj_{fv}")
             with col_s2:
-                pr_sljiva = st.number_input("Принос (кг/стаблу)", min_value=0.0, value=35.0, step=1.0, key="pr_slj")
+                pr_sljiva = st.number_input("Принос (кг/стаблу)", min_value=0.0, value=0.0, step=1.0, help="Референтни принос: 25–45 кг/стаблу", key=f"pr_slj_{fv}")
             with col_s3:
-                ci_sljiva = st.number_input("Цијена (КМ/кг)", min_value=0.0, value=1.50, step=0.10, key="ci_slj")
+                ci_sljiva = st.number_input("Цијена (КМ/кг)", min_value=0.0, value=1.50, step=0.10, key=f"ci_slj_{fv}")
 
             # Орах
             st.markdown("**🌰 Орах** *(референтни принос: 30–50 кг/стаблу | цијена: 5,00 КМ/кг)*")
             col_o1, col_o2, col_o3 = st.columns(3)
             with col_o1:
-                st_orah = st.number_input("Број стабала", min_value=0, value=0, step=1, key="st_ora")
+                st_orah = st.number_input("Број стабала", min_value=0, value=0, step=1, key=f"st_ora_{fv}")
             with col_o2:
-                pr_orah = st.number_input("Принос (кг/стаблу)", min_value=0.0, value=40.0, step=1.0, key="pr_ora")
+                pr_orah = st.number_input("Принос (кг/стаблу)", min_value=0.0, value=0.0, step=1.0, help="Референтни принос: 30–50 кг/стаблу", key=f"pr_ora_{fv}")
             with col_o3:
-                ci_orah = st.number_input("Цијена (КМ/кг)", min_value=0.0, value=5.00, step=0.50, key="ci_ora")
+                ci_orah = st.number_input("Цијена (КМ/кг)", min_value=0.0, value=5.00, step=0.50, key=f"ci_ora_{fv}")
 
             # Лоза
             st.markdown("**🍇 Лоза (Виноград)** *(обрачун у м² | цијена: 2,00 КМ/кг)*")
             col_l1, col_l2, col_l3 = st.columns(3)
             with col_l1:
-                povrsina_loza = st.number_input("Површина лозе (м²)", min_value=0.0, value=0.0, step=10.0, key="p_loza")
+                povrsina_loza = st.number_input("Површина лозе (м²)", min_value=0.0, value=0.0, step=10.0, key=f"p_loza_{fv}")
             with col_l2:
-                pr_loza = st.number_input("Принос (кг/м²)", min_value=0.0, value=1.5, step=0.1, key="pr_loza")
+                pr_loza = st.number_input("Принос (кг/м²)", min_value=0.0, value=0.0, step=0.1, help="Референтно: 1,5 кг/м²", key=f"pr_loza_{fv}")
             with col_l3:
-                ci_loza = st.number_input("Цијена лозе (КМ/кг)", min_value=0.0, value=2.00, step=0.10, key="ci_loza")
+                ci_loza = st.number_input("Цијена лозе (КМ/кг)", min_value=0.0, value=2.00, step=0.10, key=f"ci_loza_{fv}")
 
             # Шипурак
             st.markdown("**🌹 Шипурак** *(обрачун у м² | цијена: 4,00 КМ/кг)*")
             col_sip1, col_sip2, col_sip3 = st.columns(3)
             with col_sip1:
-                povrsina_sipurak = st.number_input("Површина шипурка (м²)", min_value=0.0, value=0.0, step=10.0, key="p_sipurak")
+                povrsina_sipurak = st.number_input("Површина шипурка (м²)", min_value=0.0, value=0.0, step=10.0, key=f"p_sipurak_{fv}")
             with col_sip2:
-                pr_sipurak = st.number_input("Принос (кг/м²)", min_value=0.0, value=1.0, step=0.1, key="pr_sipurak")
+                pr_sipurak = st.number_input("Принос (кг/м²)", min_value=0.0, value=0.0, step=0.1, help="Референтно: 1,0 кг/м²", key=f"pr_sipurak_{fv}")
             with col_sip3:
-                ci_sipurak = st.number_input("Цијена шипурка (КМ/кг)", min_value=0.0, value=4.00, step=0.20, key="ci_sipurak")
+                ci_sipurak = st.number_input("Цијена шипурка (КМ/кг)", min_value=0.0, value=4.00, step=0.20, key=f"ci_sipurak_{fv}")
 
             # Обрачуни за поједине воћке и културе
             osnova_jabuka = st_jabuka * pr_jabuka * ci_jabuka
@@ -575,24 +614,24 @@ with tab1:
             st.caption("Унесите оштећене површине житарица у дулумима (1 хектар = 10 дулума = 10.000 м²).")
 
             # Жито
-            st.markdown(f"**🌾 Жито** *(5 т/ха = 500 кг/дулуму | цијена 0,60 КМ/кг | штета за {насеље}: {proc_zito})*")
+            st.markdown(f"**🌾 Жито** *(референтно: 5 т/ха = 500 кг/дулуму | цијена 0,60 КМ/кг | штета за {насеље}: {proc_zito})*")
             col_z1, col_z2, col_z3 = st.columns(3)
             with col_z1:
-                dulumi_zito = st.number_input("Површина жита (дулуми)", min_value=0.0, value=0.0, step=0.1, key="d_zito")
+                dulumi_zito = st.number_input("Површина жита (дулуми)", min_value=0.0, value=0.0, step=0.1, key=f"d_zito_{fv}")
             with col_z2:
-                pr_zito = st.number_input("Принос жита (кг/дулуму)", min_value=0.0, value=500.0, step=50.0, key="pr_zito")
+                pr_zito = st.number_input("Принос жита (кг/дулуму)", min_value=0.0, value=500.0, step=50.0, help="Референтно: 5 т/ха = 500 кг/дулуму", key=f"pr_zito_{fv}")
             with col_z3:
-                ci_zito = st.number_input("Цијена жита (КМ/кг)", min_value=0.0, value=0.60, step=0.05, key="ci_zito")
+                ci_zito = st.number_input("Цијена жита (КМ/кг)", min_value=0.0, value=0.60, step=0.05, key=f"ci_zito_{fv}")
 
             # Силажни кукуруз
-            st.markdown(f"**🌽 Силажни кукуруз** *(40 т/ха = 4.000 кг/дулуму | 250 КМ/тони = 0,25 КМ/кг | штета за {насеље}: {proc_kukuruz})*")
+            st.markdown(f"**🌽 Силажни кукуруз** *(референтно: 40 т/ха = 4.000 кг/дулуму | 250 КМ/тони = 0,25 КМ/кг | штета за {насеље}: {proc_kukuruz})*")
             col_c1, col_c2, col_c3 = st.columns(3)
             with col_c1:
-                dulumi_kukuruz = st.number_input("Површина кукуруза (дулуми)", min_value=0.0, value=0.0, step=0.1, key="d_kukuruz")
+                dulumi_kukuruz = st.number_input("Површина кукуруза (дулуми)", min_value=0.0, value=0.0, step=0.1, key=f"d_kukuruz_{fv}")
             with col_c2:
-                pr_kukuruz = st.number_input("Принос кукуруза (кг/дулуму)", min_value=0.0, value=4000.0, step=200.0, key="pr_kukuruz")
+                pr_kukuruz = st.number_input("Принос кукуруза (кг/дулуму)", min_value=0.0, value=4000.0, step=100.0, help="Референтно: 40 т/ха = 4.000 кг/дулуму", key=f"pr_kukuruz_{fv}")
             with col_c3:
-                ci_kukuruz = st.number_input("Цијена кукуруза (КМ/кг)", min_value=0.0, value=0.25, step=0.01, key="ci_kukuruz")
+                ci_kukuruz = st.number_input("Цијена кукуруза (КМ/кг)", min_value=0.0, value=0.25, step=0.01, key=f"ci_kukuruz_{fv}")
 
             osnova_zito = dulumi_zito * pr_zito * ci_zito
             steta_zito = osnova_zito * coef_zito
@@ -611,7 +650,7 @@ with tab1:
 
         # Баште
         with st.expander(f"🌱 Баште (250 КМ по 100 м² - штета: {proc_basta})", expanded=True):
-            povrsina_baste = st.number_input("Површина баште (м²)", min_value=0.0, value=0.0, step=10.0, key="b_p")
+            povrsina_baste = st.number_input("Површина баште (м²)", min_value=0.0, value=0.0, step=10.0, key=f"b_p_{fv}")
             
             osnova_baste = (povrsina_baste / 100.0) * 250.0
             steta_baste = osnova_baste * coef_basta
@@ -619,14 +658,14 @@ with tab1:
 
         # Пластеник
         with st.expander(f"🏠 Пластеници (најлон 1,10 КМ/м² - штета: {proc_plastenik})", expanded=True):
-            st.caption("Обрачун штете на пластеницима рачуна се кроз оштећење најлона: за 100 м² засада пластеника потребно је 300 м² најлона (фактор 3:1) по цијени од 1,10 КМ/м².")
+            st.caption("Обрачун штете на пластеницима рачуна се у износу од 100% (оштећени најлон није могуће поново користити након града): за 100 м² засада пластеника потребно је 300 м² најлона (фактор 3:1) по цијени од 1,10 КМ/м².")
             col_pl1, col_pl2, col_pl3 = st.columns(3)
             with col_pl1:
-                povrsina_plastenik = st.number_input("Површина засада пластеника (м²)", min_value=0.0, value=0.0, step=10.0, key="pl_pov")
+                povrsina_plastenik = st.number_input("Површина засада пластеника (м²)", min_value=0.0, value=0.0, step=10.0, key=f"pl_pov_{fv}")
             with col_pl2:
-                faktor_najlona = st.number_input("Утрошак најлона (м² најлона / м² засада)", min_value=1.0, value=3.0, step=0.1, key="pl_fak")
+                faktor_najlona = st.number_input("Утрошак најлона (м² најлона / м² засада)", min_value=1.0, value=3.0, step=0.1, key=f"pl_fak_{fv}")
             with col_pl3:
-                ci_najlon = st.number_input("Цијена најлона (КМ/м²)", min_value=0.0, value=1.10, step=0.05, key="pl_ci")
+                ci_najlon = st.number_input("Цијена најлона (КМ/м²)", min_value=0.0, value=1.10, step=0.05, key=f"pl_ci_{fv}")
 
             povrsina_najlona = povrsina_plastenik * faktor_najlona
             osnova_plastenik = povrsina_najlona * ci_najlon
@@ -641,11 +680,11 @@ with tab1:
         with st.expander(f"🥔 Кромпир (3 т/дулуму × 1,00 КМ/кг - штета: {proc_krompir})", expanded=True):
             col_kro1, col_kro2, col_kro3 = st.columns(3)
             with col_kro1:
-                broj_duluma_krompir = st.number_input("Површина кромпира (дулуми)", min_value=0.0, value=0.0, step=0.1, key="k_d")
+                broj_duluma_krompir = st.number_input("Површина кромпира (дулуми)", min_value=0.0, value=0.0, step=0.1, key=f"k_d_{fv}")
             with col_kro2:
-                pr_krompir = st.number_input("Принос (кг/дулуму)", min_value=0.0, value=3000.0, step=200.0, key="pr_kro")
+                pr_krompir = st.number_input("Принос (кг/дулуму)", min_value=0.0, value=3000.0, step=100.0, help="Референтно: 3 т/дулуму = 3.000 кг/дулуму", key=f"pr_kro_{fv}")
             with col_kro3:
-                ci_krompir = st.number_input("Цијена (КМ/кг)", min_value=0.0, value=1.00, step=0.10, key="ci_kro")
+                ci_krompir = st.number_input("Цијена (КМ/кг)", min_value=0.0, value=1.00, step=0.10, key=f"ci_kro_{fv}")
 
             procenjeni_prinos_krompir_kg = broj_duluma_krompir * pr_krompir
             osnova_krompir = broj_duluma_krompir * pr_krompir * ci_krompir
@@ -660,11 +699,11 @@ with tab1:
         with st.expander(f"🧅 Лук (4 т/дулуму × 1,20 КМ/кг - штета: {proc_luk})", expanded=True):
             col_l1, col_l2, col_l3 = st.columns(3)
             with col_l1:
-                broj_duluma_luk = st.number_input("Површина лука (дулуми)", min_value=0.0, value=0.0, step=0.1, key="l_d")
+                broj_duluma_luk = st.number_input("Површина лука (дулуми)", min_value=0.0, value=0.0, step=0.1, key=f"l_d_{fv}")
             with col_l2:
-                pr_luk = st.number_input("Принос лука (кг/дулуму)", min_value=0.0, value=4000.0, step=200.0, key="pr_luk")
+                pr_luk = st.number_input("Принос лука (кг/дулуму)", min_value=0.0, value=4000.0, step=100.0, help="Референтно: 4 т/дулуму = 4.000 кг/дулуму", key=f"pr_luk_{fv}")
             with col_l3:
-                ci_luk = st.number_input("Цијена лука (КМ/кг)", min_value=0.0, value=1.20, step=0.10, key="ci_luk")
+                ci_luk = st.number_input("Цијена лука (КМ/кг)", min_value=0.0, value=1.20, step=0.10, key=f"ci_luk_{fv}")
 
             procenjeni_prinos_luk_kg = broj_duluma_luk * pr_luk
             osnova_luk = broj_duluma_luk * pr_luk * ci_luk
@@ -679,11 +718,11 @@ with tab1:
         with st.expander(f"🥬 Купус (6 т/дулуму × 1,00 КМ/кг - штета: {proc_kupus})", expanded=True):
             col_kup1, col_kup2, col_kup3 = st.columns(3)
             with col_kup1:
-                broj_duluma_kupus = st.number_input("Површина купуса (дулуми)", min_value=0.0, value=0.0, step=0.1, key="kup_d")
+                broj_duluma_kupus = st.number_input("Површина купуса (дулуми)", min_value=0.0, value=0.0, step=0.1, key=f"kup_d_{fv}")
             with col_kup2:
-                pr_kupus = st.number_input("Принос купуса (кг/дулуму)", min_value=0.0, value=6000.0, step=500.0, key="pr_kup")
+                pr_kupus = st.number_input("Принос купуса (кг/дулуму)", min_value=0.0, value=6000.0, step=100.0, help="Референтно: 6 т/дулуму = 6.000 кг/дулуму", key=f"pr_kup_{fv}")
             with col_kup3:
-                ci_kupus = st.number_input("Цијена купуса (КМ/кг)", min_value=0.0, value=1.00, step=0.10, key="ci_kup")
+                ci_kupus = st.number_input("Цијена купуса (КМ/кг)", min_value=0.0, value=1.00, step=0.10, key=f"ci_kup_{fv}")
 
             procenjeni_prinos_kupus_kg = broj_duluma_kupus * pr_kupus
             osnova_kupus = broj_duluma_kupus * pr_kupus * ci_kupus
@@ -715,7 +754,7 @@ with tab1:
         tabela_rows = []
         spec_list = []
 
-        if st_jabuka > 0:
+        if st_jabuka > 0 and pr_jabuka > 0:
             tabela_rows.append({
                 "Култура": "Воће - Јабука",
                 "Параметри": f"{st_jabuka} ст. × {pr_jabuka}кг × {ci_jabuka:.2f}КМ",
@@ -726,7 +765,7 @@ with tab1:
             })
             spec_list.append(f"Јабука: {steta_jabuka:.2f} КМ")
 
-        if st_kruska > 0:
+        if st_kruska > 0 and pr_kruska > 0:
             tabela_rows.append({
                 "Култура": "Воће - Крушка",
                 "Параметри": f"{st_kruska} ст. × {pr_kruska}кг × {ci_kruska:.2f}КМ",
@@ -737,7 +776,7 @@ with tab1:
             })
             spec_list.append(f"Крушка: {steta_kruska:.2f} КМ")
 
-        if st_sljiva > 0:
+        if st_sljiva > 0 and pr_sljiva > 0:
             tabela_rows.append({
                 "Култура": "Воће - Шљива",
                 "Параметри": f"{st_sljiva} ст. × {pr_sljiva}кг × {ci_sljiva:.2f}КМ",
@@ -748,7 +787,7 @@ with tab1:
             })
             spec_list.append(f"Шљива: {steta_sljiva:.2f} КМ")
 
-        if st_orah > 0:
+        if st_orah > 0 and pr_orah > 0:
             tabela_rows.append({
                 "Култура": "Воће - Орах",
                 "Параметри": f"{st_orah} ст. × {pr_orah}кг × {ci_orah:.2f}КМ",
@@ -759,7 +798,7 @@ with tab1:
             })
             spec_list.append(f"Орах: {steta_orah:.2f} КМ")
 
-        if povrsina_loza > 0:
+        if povrsina_loza > 0 and pr_loza > 0:
             tabela_rows.append({
                 "Култура": "Воће - Лоза",
                 "Параметри": f"{povrsina_loza:.1f} м² × {pr_loza}кг × {ci_loza:.2f}КМ",
@@ -770,7 +809,7 @@ with tab1:
             })
             spec_list.append(f"Лоза: {steta_loza:.2f} КМ")
 
-        if povrsina_sipurak > 0:
+        if povrsina_sipurak > 0 and pr_sipurak > 0:
             tabela_rows.append({
                 "Култура": "Воће - Шипурак",
                 "Параметри": f"{povrsina_sipurak:.1f} м² × {pr_sipurak}кг × {ci_sipurak:.2f}КМ",
@@ -781,7 +820,7 @@ with tab1:
             })
             spec_list.append(f"Шипурак: {steta_sipurak:.2f} КМ")
 
-        if dulumi_zito > 0:
+        if dulumi_zito > 0 and pr_zito > 0:
             tabela_rows.append({
                 "Култура": "Житарице - Жито",
                 "Параметри": f"{dulumi_zito:.2f} дул. × {pr_zito:,.0f}кг × {ci_zito:.2f}КМ",
@@ -792,7 +831,7 @@ with tab1:
             })
             spec_list.append(f"Жито: {steta_zito:.2f} КМ")
 
-        if dulumi_kukuruz > 0:
+        if dulumi_kukuruz > 0 and pr_kukuruz > 0:
             tabela_rows.append({
                 "Култура": "Житарице - Кукуруз",
                 "Параметри": f"{dulumi_kukuruz:.2f} дул. × {pr_kukuruz:,.0f}кг × {ci_kukuruz:.2f}КМ",
@@ -825,7 +864,7 @@ with tab1:
             })
             spec_list.append(f"Пластеник: {steta_plastenik:.2f} КМ")
 
-        if broj_duluma_krompir > 0:
+        if broj_duluma_krompir > 0 and pr_krompir > 0:
             tabela_rows.append({
                 "Култура": "Кромпир",
                 "Параметри": f"{broj_duluma_krompir:.2f} дул. × {pr_krompir:,.0f}кг × {ci_krompir:.2f}КМ",
@@ -836,7 +875,7 @@ with tab1:
             })
             spec_list.append(f"Кромпир: {steta_krompir:.2f} КМ")
 
-        if broj_duluma_luk > 0:
+        if broj_duluma_luk > 0 and pr_luk > 0:
             tabela_rows.append({
                 "Култура": "Поврће - Лук",
                 "Параметри": f"{broj_duluma_luk:.2f} дул. × {pr_luk:,.0f}кг × {ci_luk:.2f}КМ",
@@ -847,7 +886,7 @@ with tab1:
             })
             spec_list.append(f"Лук: {steta_luk:.2f} КМ")
 
-        if broj_duluma_kupus > 0:
+        if broj_duluma_kupus > 0 and pr_kupus > 0:
             tabela_rows.append({
                 "Култура": "Поврће - Купус",
                 "Параметри": f"{broj_duluma_kupus:.2f} дул. × {pr_kupus:,.0f}кг × {ci_kupus:.2f}КМ",
@@ -1115,7 +1154,7 @@ with tab1:
             buffer.seek(0)
             return buffer
 
-        col_b1, col_b2 = st.columns(2)
+        col_b1, col_b2, col_b3 = st.columns([1, 1, 1])
         with col_b1:
             if st.button("💾 Сачувај обрачун у базу (Google Sheets)", type="primary", use_container_width=True):
                 if not име_презиме.strip():
@@ -1143,6 +1182,15 @@ with tab1:
                             mime="application/pdf",
                             use_container_width=True
                         )
+
+        with col_b3:
+            st.button(
+                "🔄 Нови унос (Очисти)",
+                on_click=reset_form_callback,
+                key="btn_novi_unos_bottom",
+                help="Поништава сва унесена поља у обрасцу и припрема форму за новог произвођача",
+                use_container_width=True
+            )
 
 # ---------------------------------------------------------
 # TAB 2: Збирни Дашборд (База Уноса)
